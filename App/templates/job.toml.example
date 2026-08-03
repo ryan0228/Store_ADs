@@ -1,0 +1,5 @@
+# Copy this file to a yyyyMMdd job folder as job.toml only when overrides are needed.
+
+[styles.clean]
+accent_color = "#F2B134"
+rotation_degrees = 2.0

@@ -1,0 +1,31 @@
+# Python and local build artifacts
+**/__pycache__/
+**/*.py[cod]
+App/.venv/
+App/build/
+App/dist/
+App/*.spec
+App/ShopAds.exe
+
+# Generated runtime artifacts
+**/Logs/
+**/PublishPackages/
+**/run-manifest.json
+**/Result/Generated/
+
+# Private daily work folders (the GitHub repository is public)
+/[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]/
+
+# Local overrides and secrets
+**/config.local.toml
+**/.env
+**/.env.*
+**/*credentials*
+**/*secret*
+**/*token*
+
+# OS and editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

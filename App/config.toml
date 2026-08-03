@@ -1,0 +1,30 @@
+[paths]
+work_root = 'D:\CASE\Shop_ADs'
+
+[image]
+width = 1080
+height = 1080
+default_style = "clean"
+max_images_per_page = 3
+output_format = "png"
+
+[font]
+regular = 'C:\Windows\Fonts\msjh.ttc'
+bold = 'C:\Windows\Fonts\msjhbd.ttc'
+title_size = 68
+body_size = 36
+footer_size = 42
+minimum_size = 22
+
+[styles.clean]
+background_color = "#F7F5F2"
+primary_color = "#234E70"
+accent_color = "#F2B134"
+title_color = "#222222"
+body_color = "#444444"
+card_color = "#FFFFFF"
+border_color = "#FFFFFF"
+safe_margin = 72
+corner_radius = 26
+shadow_blur = 18
+rotation_degrees = 2.0
