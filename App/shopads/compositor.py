@@ -154,6 +154,33 @@ def _paste_rotated_card(
     canvas.alpha_composite(rotated, (x, y))
 
 
+def _apply_branding(canvas: Image.Image, config: dict[str, Any]) -> None:
+    branding = config["branding"]
+    path = Path(branding["_footer_image_path"])
+    try:
+        with Image.open(path) as source:
+            logo = source.convert("RGBA")
+    except (OSError, UnidentifiedImageError) as exc:
+        raise ShopAdsError("E207", "PROCESS_IMAGES", f"品牌頁尾圖片無法讀取：{exc}", str(path)) from exc
+    target_width = int(branding["footer_width"])
+    target_height = max(1, round(logo.height * target_width / logo.width))
+    logo = logo.resize((target_width, target_height), Image.Resampling.LANCZOS)
+    margin = int(branding["footer_margin"])
+    canvas.alpha_composite(logo, (canvas.width - target_width - margin, canvas.height - target_height - margin))
+
+
+def _save_canvas(canvas: Image.Image, output_path: Path) -> None:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = output_path.with_name(f".{output_path.name}.tmp")
+    try:
+        canvas.convert("RGB").save(temporary, format="PNG", optimize=True)
+        os.replace(temporary, output_path)
+    except OSError as exc:
+        if temporary.exists():
+            temporary.unlink()
+        raise ShopAdsError("E301", "WRITE_OUTPUT", f"成品無法寫入：{exc}", str(output_path)) from exc
+
+
 def compose_clean(
     image_paths: list[Path],
     description: dict[str, str],
@@ -193,8 +220,11 @@ def compose_clean(
     elif count == 3:
         card_width, card_height = 290, 470
         centers = [(215, 505), (540, 505), (865, 505)]
+    elif count == 4:
+        card_width, card_height = 390, 245
+        centers = [(320, 365), (760, 365), (320, 655), (760, 655)]
     else:
-        raise ShopAdsError("E206", "PROCESS_IMAGES", "單頁來源圖片不可超過三張。")
+        raise ShopAdsError("E206", "PROCESS_IMAGES", "單張成品來源圖片必須為一至四張。")
 
     maximum_rotation = float(style["rotation_degrees"])
     for path, center in zip(image_paths, centers, strict=True):
@@ -218,22 +248,31 @@ def compose_clean(
         font_cfg["bold"],
         int(font_cfg["footer_size"]),
         int(font_cfg["minimum_size"]),
-        (margin, 930, width - margin, 1035),
+        (margin, 930, width - int(config["branding"]["footer_width"]) - int(config["branding"]["footer_margin"]) * 2, 1035),
         style["primary_color"],
         spacing=5,
     )
 
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = output_path.with_name(f".{output_path.name}.tmp")
-    try:
-        canvas.convert("RGB").save(temporary, format="PNG", optimize=True)
-        os.replace(temporary, output_path)
-    except OSError as exc:
-        if temporary.exists():
-            temporary.unlink()
-        raise ShopAdsError(
-            "E301", "WRITE_OUTPUT", f"成品無法寫入：{exc}", str(output_path)
-        ) from exc
+    _apply_branding(canvas, config)
+    _save_canvas(canvas, output_path)
+
+
+def compose_vendor_text(description: dict[str, str], config: dict[str, Any], output_path: Path) -> None:
+    image_cfg = config["image"]
+    font_cfg = config["font"]
+    style = config["styles"][image_cfg["default_style"]]
+    width, height = int(image_cfg["width"]), int(image_cfg["height"])
+    margin = int(style["safe_margin"])
+    canvas = Image.new("RGBA", (width, height), style["background_color"])
+    draw = ImageDraw.Draw(canvas)
+    draw.rounded_rectangle((margin, 38, width - margin, 46), radius=4, fill=style["accent_color"])
+    fit_text(draw, description["上標題"], font_cfg["bold"], int(font_cfg["title_size"]), int(font_cfg["minimum_size"]), (margin, 65, width - margin, 190), style["title_color"])
+    panel = (margin, 220, width - margin, 885)
+    draw.rounded_rectangle(panel, radius=int(style["corner_radius"]), fill=style["card_color"], outline=style["accent_color"], width=4)
+    fit_text(draw, description["說明"], font_cfg["regular"], int(font_cfg["body_size"]), int(font_cfg["minimum_size"]), (panel[0] + 45, panel[1] + 40, panel[2] - 45, panel[3] - 40), style["body_color"], spacing=12)
+    fit_text(draw, description["下標題"], font_cfg["bold"], int(font_cfg["footer_size"]), int(font_cfg["minimum_size"]), (margin, 910, width - int(config["branding"]["footer_width"]) - int(config["branding"]["footer_margin"]) * 2, 1035), style["primary_color"], spacing=5)
+    _apply_branding(canvas, config)
+    _save_canvas(canvas, output_path)
 
 
 def verify_image(path: Path, expected_size: tuple[int, int] | None = None) -> None:

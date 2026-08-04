@@ -56,7 +56,7 @@ def _load_for_job(config_argument: str | None, job_argument: str | None) -> tupl
     return job_dir, load_config(config_path, job_dir)
 
 
-def _safe_cleanup_group(generated_dir: Path, group_name: str) -> list[str]:
+def _safe_cleanup_generated(generated_dir: Path) -> list[str]:
     generated_dir.mkdir(parents=True, exist_ok=True)
     resolved = generated_dir.resolve()
     expected_parent = generated_dir.parent.resolve()
@@ -64,7 +64,7 @@ def _safe_cleanup_group(generated_dir: Path, group_name: str) -> list[str]:
         raise ShopAdsError(
             "E302", "WRITE_OUTPUT", "拒絕清理非 Generated 目錄。", str(resolved)
         )
-    pattern = re.compile(rf"^{re.escape(group_name)}(?:-\d+)?\.(?:png|gif)$", re.IGNORECASE)
+    pattern = re.compile(r"^\d{2}\.(?:png|gif)$", re.IGNORECASE)
     removed: list[str] = []
     for path in generated_dir.iterdir():
         if path.is_file() and pattern.fullmatch(path.name):
@@ -74,12 +74,8 @@ def _safe_cleanup_group(generated_dir: Path, group_name: str) -> list[str]:
 
 
 def _source_records(job: JobSpec) -> list[dict[str, Any]]:
-    paths = [job.directory / "Prod_Description.md"]
-    for group in job.groups:
-        paths.extend(group.images)
-        description = group.directory / "Img_Description.md"
-        if description.is_file() and not group.passthrough_gif:
-            paths.append(description)
+    duplicate_paths = [item[0] for item in job.duplicate_images]
+    paths = [job.directory / "Product_Description.md", *job.images, *duplicate_paths]
     return [relative_record(path, job.directory) for path in paths]
 
 
@@ -88,21 +84,61 @@ def command_validate(args: argparse.Namespace) -> int:
     _setup_logging(job_dir)
     LOGGER.info("[VALIDATE_INPUT] 作業目錄：%s", job_dir)
     job = inspect_job(job_dir)
-    for group in job.groups:
-        mode = "GIF 複製" if group.passthrough_gif else f"靜態圖片 {len(group.images)} 張"
-        LOGGER.info("[VALIDATE_INPUT] 群組 %s：%s", group.name, mode)
+    for duplicate, original, _digest in job.duplicate_images:
+        LOGGER.warning("[VALIDATE_INPUT] 略過重複圖片：%s（與 %s 內容相同）。", duplicate.name, original.name)
+    LOGGER.info("[VALIDATE_INPUT] 靜態圖片：%d 張（含單影格 GIF %d 個）；動畫 GIF：%d 個。", len(job.static_images), len(job.single_frame_gifs), len(job.animated_gifs))
     for error in job.errors:
         _print_error(error)
     if job.errors:
-        LOGGER.error("驗證失敗：%d 個群組錯誤。", len(job.errors))
+        LOGGER.error("驗證失敗：%d 個輸入錯誤。", len(job.errors))
         return 1
-    LOGGER.info("驗證成功：%d 個群組。", len(job.groups))
+    LOGGER.info("驗證成功：共 %d 個有效來源檔案，略過 %d 個重複檔案。", len(job.images), len(job.duplicate_images))
+    return 0
+
+
+def command_new_job(args: argparse.Namespace) -> int:
+    from .job_ops import create_job, open_job
+
+    config_path = Path(args.config).resolve() if args.config else None
+    config = load_config(config_path)
+    _setup_logging()
+    job_dir = create_job(Path(config["paths"]["work_root"]), args.date)
+    LOGGER.info("[CREATE_JOB] 已建立商品作業：%s", job_dir)
+    LOGGER.info("下一步：填寫 Product_Description.md，並將商品圖片放入 Input。")
+    if not args.no_open:
+        for failure in open_job(job_dir):
+            LOGGER.warning("[CREATE_JOB] 無法自動開啟 %s", failure)
+    return 0
+
+
+def command_analyze(args: argparse.Namespace) -> int:
+    from .ai_plan import save_plan
+    from .ai_provider import analyze
+
+    job_dir, config = _load_for_job(args.config, args.job)
+    _setup_logging(job_dir)
+    job = inspect_job(job_dir)
+    for duplicate, original, digest in job.duplicate_images:
+        LOGGER.warning("[AI_ANALYZE] 不送出重複圖片：%s（保留 %s，SHA-256 %s…）。", duplicate.name, original.name, digest[:12])
+    maximum = int(config["ai"].get("max_input_images", 15))
+    if len(job.images) > maximum:
+        raise ShopAdsError("E628", "AI_ANALYZE", f"來源檔案共 {len(job.images)} 個，超過上限 {maximum} 個。", str(job_dir / "Input"))
+    LOGGER.info("[AI_ANALYZE] 使用 %s 分析 %d 張靜態圖片與 %d 個動畫 GIF 代表影格；不傳送完整 GIF。", config["ai"].get("provider"), len(job.static_images), len(job.animated_gifs))
+    payload, metadata = analyze(job, config)
+    rejected = payload.setdefault("rejected", [])
+    for duplicate, original, _digest in job.duplicate_images:
+        rejected.append({"image": duplicate.name, "reason": f"與 {original.name} 檔案內容完全相同，已在上傳 AI 前略過。"})
+    payload["product"] = job.product
+    payload["ai"] = metadata
+    plan_path = save_plan(job_dir, payload)
+    LOGGER.info("[AI_PLAN] 已建立：%s", plan_path)
+    LOGGER.info("[AI_PLAN] 預覽：%s", job_dir / "Work" / "preview.html")
     return 0
 
 
 def command_generate(args: argparse.Namespace) -> int:
     try:
-        from .compositor import compose_clean, verify_image
+        from .compositor import compose_clean, compose_vendor_text, verify_image
     except RuntimeError as exc:
         raise ShopAdsError("E003", "ENVIRONMENT", str(exc)) from exc
 
@@ -110,74 +146,55 @@ def command_generate(args: argparse.Namespace) -> int:
     log_path = _setup_logging(job_dir)
     LOGGER.info("[VALIDATE_INPUT] 開始生成：%s", job_dir)
     job = inspect_job(job_dir)
+    from .ai_plan import load_plan
+    plan = load_plan(job_dir)
     errors = list(job.errors)
     generated_dir = job_dir / "Result" / "Generated"
     generated_dir.mkdir(parents=True, exist_ok=True)
     (job_dir / "Result" / "Final").mkdir(parents=True, exist_ok=True)
     group_results: list[dict[str, Any]] = []
-    max_per_page = int(config["image"]["max_images_per_page"])
     expected_size = (int(config["image"]["width"]), int(config["image"]["height"]))
 
-    for group in job.groups:
-        LOGGER.info("[PROCESS_IMAGES] 處理群組 %s。", group.name)
-        try:
-            with tempfile.TemporaryDirectory(prefix=f"shopads-{group.name}-", dir=job_dir / "Result") as temp_name:
-                staging_dir = Path(temp_name)
-                staged: list[Path] = []
-                if group.passthrough_gif:
-                    output = staging_dir / f"{group.name}.gif"
-                    shutil.copyfile(group.images[0], output)
+    input_by_name = {path.name: path for path in job.images}
+    staged_all: list[Path] = []
+    try:
+        with tempfile.TemporaryDirectory(prefix="shopads-plan-", dir=job_dir / "Result") as temp_name:
+            staging_dir = Path(temp_name)
+            for output_plan in plan["outputs"]:
+                name = output_plan["output"]
+                LOGGER.info("[PROCESS_IMAGES] 處理成品 %s。", name)
+                sources = [input_by_name[item] for item in output_plan["images"]]
+                output = staging_dir / name
+                if output_plan["type"] == "gif":
+                    shutil.copyfile(sources[0], output)
                     verify_image(output)
-                    staged.append(output)
+                    mode = "gif_passthrough"
+                elif output_plan["type"] == "text":
+                    compose_vendor_text({"上標題": output_plan["top_title"], "說明": output_plan["description"], "下標題": output_plan["bottom_title"]}, config, output)
+                    verify_image(output, expected_size)
+                    mode = "vendor_text"
                 else:
-                    pages = [
-                        group.images[index : index + max_per_page]
-                        for index in range(0, len(group.images), max_per_page)
-                    ]
-                    for page_index, page in enumerate(pages, start=1):
-                        filename = (
-                            f"{group.name}.png"
-                            if len(pages) == 1
-                            else f"{group.name}-{page_index}.png"
-                        )
-                        output = staging_dir / filename
-                        compose_clean(
-                            page,
-                            group.description or {},
-                            group.name,
-                            page_index,
-                            config,
-                            output,
-                        )
-                        verify_image(output, expected_size)
-                        staged.append(output)
+                    compose_clean(sources, {"上標題": output_plan["top_title"], "說明": output_plan["description"], "下標題": output_plan["bottom_title"]}, job_dir.name, int(Path(name).stem), config, output)
+                    verify_image(output, expected_size)
+                    mode = output_plan["layout"]
+                staged_all.append(output)
+                group_results.append({"name": Path(name).stem, "mode": mode, "inputs": [relative_record(path, job_dir) for path in sources], "outputs": []})
 
-                removed = _safe_cleanup_group(generated_dir, group.name)
-                if removed:
-                    LOGGER.info("[WRITE_OUTPUT] 清除舊成品：%s", ", ".join(removed))
-                final_outputs: list[Path] = []
-                for staged_path in staged:
-                    destination = generated_dir / staged_path.name
-                    os.replace(staged_path, destination)
-                    final_outputs.append(destination)
-                    LOGGER.info("[WRITE_OUTPUT] 已產生：%s", destination)
-                group_results.append(
-                    {
-                        "name": group.name,
-                        "mode": "gif_passthrough" if group.passthrough_gif else "clean",
-                        "inputs": [relative_record(path, job_dir) for path in group.images],
-                        "outputs": [relative_record(path, job_dir) for path in final_outputs],
-                    }
-                )
-        except ShopAdsError as exc:
-            errors.append(exc)
-            _print_error(exc)
-        except OSError as exc:
-            error = ShopAdsError(
-                "E303", "WRITE_OUTPUT", f"群組處理失敗：{exc}", str(group.directory)
-            )
-            errors.append(error)
-            _print_error(error)
+            removed = _safe_cleanup_generated(generated_dir)
+            if removed:
+                LOGGER.info("[WRITE_OUTPUT] 清除舊成品：%s", ", ".join(removed))
+            for staged_path, result in zip(staged_all, group_results, strict=True):
+                destination = generated_dir / staged_path.name
+                os.replace(staged_path, destination)
+                result["outputs"] = [relative_record(destination, job_dir)]
+                LOGGER.info("[WRITE_OUTPUT] 已產生：%s", destination)
+    except ShopAdsError as exc:
+        errors.append(exc)
+        _print_error(exc)
+    except OSError as exc:
+        error = ShopAdsError("E303", "WRITE_OUTPUT", f"計畫處理失敗：{exc}", str(job_dir))
+        errors.append(error)
+        _print_error(error)
 
     status = "success" if not errors and group_results else "partial" if group_results else "failed"
     manifest = {
@@ -254,12 +271,21 @@ def build_parser() -> argparse.ArgumentParser:
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
+    new_job = subparsers.add_parser("new-job", help="建立今天的下一個商品作業。")
+    new_job.add_argument("--date", help="指定 YYYY-MM-DD；省略時使用本機今天日期。")
+    new_job.add_argument("--no-open", action="store_true", help="建立後不要開啟描述檔與 Input。")
+    new_job.set_defaults(handler=command_new_job)
+
     validate = subparsers.add_parser("validate", help="檢查作業目錄與說明檔。")
-    validate.add_argument("job", nargs="?", help="yyyyMMdd 作業目錄；省略時使用最新日期。")
+    validate.add_argument("job", nargs="?", help="yyyyMMdd-NN 作業目錄；省略時使用最新作業。")
     validate.set_defaults(handler=command_validate)
 
+    analyze_parser = subparsers.add_parser("analyze", help="以 AI 分析 Input 並建立預覽計畫。")
+    analyze_parser.add_argument("job", nargs="?", help="yyyyMMdd-NN 作業目錄；省略時使用最新作業。")
+    analyze_parser.set_defaults(handler=command_analyze)
+
     generate = subparsers.add_parser("generate", help="產生 Generated 圖片。")
-    generate.add_argument("job", nargs="?", help="yyyyMMdd 作業目錄；省略時使用最新日期。")
+    generate.add_argument("job", nargs="?", help="yyyyMMdd-NN 作業目錄；省略時使用最新作業。")
     generate.set_defaults(handler=command_generate)
 
     check = subparsers.add_parser("check-final", help="檢查 Final 是否可供封裝。")

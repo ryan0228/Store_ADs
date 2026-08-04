@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import shutil
+import json
 import sys
 from pathlib import Path
 
@@ -19,20 +19,24 @@ def create_product_image(path: Path, color: str, label: str) -> None:
 
 def main(target: Path) -> None:
     if target.exists():
-        shutil.rmtree(target)
-    group = target / "01"
-    group.mkdir(parents=True)
-    (target / "Prod_Description.md").write_text(
-        "# 商品名稱\n測試商品\n# 使用情境\n日常質感生活\n# 商品說明\n用於版面驗證的測試商品。\n",
-        encoding="utf-8",
-    )
-    (group / "Img_Description.md").write_text(
-        "# 上標題\n簡約生活，從今天開始\n# 說明\n三款設計依序呈現，保留商品完整外觀與清楚資訊。\n# 下標題\n探索你的理想選擇\n",
-        encoding="utf-8",
-    )
-    create_product_image(group / "01.png", "#355C7D", "商品 A")
-    create_product_image(group / "02.png", "#C06C84", "商品 B")
-    create_product_image(group / "03.png", "#6C5B7B", "商品 C")
+        raise SystemExit(f"Target already exists: {target}")
+    input_dir = target / "Input"
+    work_dir = target / "Work"
+    input_dir.mkdir(parents=True)
+    work_dir.mkdir()
+    (target / "Product_Description.md").write_text("# 商品名稱\n測試商品\n# 商品說明\n用於品牌版面驗證。\n# 商品用途\n日常質感生活\n# 廠商文字說明\n日本語の商品説明を繁体字中国語で紹介します。\n", encoding="utf-8")
+    create_product_image(input_dir / "01.png", "#355C7D", "商品 A")
+    create_product_image(input_dir / "02.png", "#C06C84", "商品 B")
+    create_product_image(input_dir / "03.png", "#6C5B7B", "商品 C")
+    plan = {
+        "schema_version": 1,
+        "outputs": [
+            {"output": "01.png", "type": "static", "layout": "three_cards", "images": ["01.png", "02.png", "03.png"], "top_title": "簡約生活，從今天開始", "description": "保留商品完整外觀與清楚資訊", "bottom_title": "探索理想選擇"},
+            {"output": "02.png", "type": "text", "layout": "vendor_text", "images": [], "top_title": "廠商商品資訊", "description": "• 廠商日文說明已翻譯為繁體中文\n• 文字經過整理，方便快速閱讀\n• 實際內容請以商品標示為準", "bottom_title": "購買前請詳閱"},
+        ],
+        "rejected": [],
+    }
+    (work_dir / "ai-plan.json").write_text(json.dumps(plan, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 if __name__ == "__main__":

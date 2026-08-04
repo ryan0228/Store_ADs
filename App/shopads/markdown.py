@@ -44,4 +44,4 @@ def parse_sections(path: Path, required: tuple[str, ...]) -> dict[str, str]:
             str(path),
             "使用 Markdown 標題建立欄位，並在標題下填入文字。",
         )
-    return {name: result[name] for name in required}
+    return result

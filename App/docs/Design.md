@@ -2,13 +2,16 @@
 
 ## 1. 架構
 
-系統分成可重現的 Python 核心與未來的 AI Skill／發布層：
+系統分成供應商中立的 AI 規劃層與可重現的 Python 合成核心：
 
 ```text
 CLI
 ├─ 設定載入
 ├─ 輸入驗證
-├─ Markdown 解析
+├─ Product Description 解析
+├─ AI 分析副本
+├─ AI Provider（OpenAI / Google）
+├─ AI Plan 驗證與預覽
 ├─ 圖片合成
 ├─ Manifest / Log
 ├─ Final 檢查
@@ -20,7 +23,13 @@ CLI
 └─ 靜態網站 / GitHub 發布
 ```
 
-第一階段不呼叫生成式圖片服務，以保護商品外觀與文字。AI 未來只協助檢視、產生背景或調整工作流程。
+AI 只分析使用者提供的圖片並產生結構化文字計畫，不呼叫圖片生成服務。商品外觀不得由 AI 重畫、補圖、換背景或修改。
+
+## 1.1 AI Provider 契約
+
+Provider 接收商品欄位、移除 metadata 且限制解析度的靜態圖分析副本、可用版型與固定文案政策，回傳相同的 JSON Schema。API 差異、驗證、重試與 usage 解析封裝在 Adapter 內；合成器不得依賴供應商。
+
+API key 由未追蹤的 `App\config.local.toml` 讀取。該檔不得寫入 Log、Manifest、EXE 或 ZIP；共用 `config.toml` 只保存 provider、model 與限制。
 
 ## 2. 技術
 
@@ -40,10 +49,12 @@ shopads/
 ├─ config.py       TOML 載入、合併、設定驗證
 ├─ errors.py       結構化錯誤
 ├─ markdown.py     固定 Markdown 欄位解析
-├─ validation.py   作業與群組檢查
+├─ validation.py   作業、圖片與 GIF 影格分類
+├─ ai_plan.py      AI Plan 契約、驗證、快取與預覽
+├─ ai_provider.py  Provider Adapter 與安全 API 呼叫
 ├─ compositor.py   clean 版型與文字排版
 ├─ manifest.py     SHA-256 與執行紀錄
-└─ package.py      Final 檢查與 ZIP 封裝
+└─ package_ops.py  Final 檢查與 ZIP 封裝
 ```
 
 ## 4. 設定合併
@@ -56,6 +67,10 @@ shopads/
 
 `job.toml` 只允許覆寫圖片與版型參數，不允許改變憑證來源或任意輸出路徑。
 
+## 4.1 快速建立作業
+
+`new-job` 讀取 `paths.work_root`，以本機時區日期產生 `yyyyMMdd`，依序檢查 `01`～`10`。程式先在作業根目錄建立唯一暫存目錄，放入 `Product_Description.md`、`Input`、`Result\Generated`、`Result\Final`，確認目標仍不存在後以同磁碟 rename 原子完成。`NewJob.cmd` 預設開啟描述檔與 Input；CLI 的 `--no-open` 供自動化使用。
+
 ## 5. 圖片版面
 
 1080×1080 clean 版型分成：
@@ -64,7 +79,11 @@ shopads/
 - 中央商品卡片區
 - 下方說明與下標題安全區
 
-來源圖以 `contain` 模式完整放入卡片。卡片使用白底、圓角、邊框與陰影；旋轉角度由群組名稱、頁碼及檔名計算固定 seed，確保重跑一致。
+來源圖以 `contain` 模式完整放入卡片。AI 從 `hero`、`two_cards`、`three_cards`、`four_grid` 中選擇；最後商品資訊摘要使用 `vendor_text`。卡片使用白底、圓角、邊框與陰影。旋轉角度由作業、成品序號及檔名計算固定 seed，確保重跑一致。
+
+所有 PNG 在其他內容完成後，統一由合成器將 `assets\branding\shop-footer.png` 等比例縮放並貼至右下角品牌安全區。品牌資產由 `config.toml` 指定相對 App 路徑，啟動時驗證，不交給 AI 修改。多影格 GIF 保持 passthrough，不套品牌圖；單影格 GIF 進入靜態合成流程。
+
+`vendor_text` 不引用來源圖片，作為獨立的商品資訊摘要卡。AI 將商品描述、廠商文字與圖片 OCR 可辨識資訊合併、去重、翻譯並濃縮為繁體中文重點。廠商文字存在時必須產生；否則由 `ai.summary_min_facts` 控制最低資訊量，達標才產生。該輸出最多一張，且必須位於所有靜態圖與 GIF 計畫之後。
 
 文字依像素寬度換行並逐級縮小字體。到達最小字級仍超出指定區域時丟出排版錯誤，不截斷文字。
 
@@ -92,9 +111,8 @@ shopads/
 只允許刪除：
 
 ```text
-<job>\Result\Generated\<group>.png
-<job>\Result\Generated\<group>-<number>.png
-<job>\Result\Generated\<group>.gif
+<job>\Result\Generated\<兩位數>.png
+<job>\Result\Generated\<兩位數>.gif
 ```
 
 刪除前解析絕對路徑，確認父目錄正是目前作業的 `Result\Generated`。程式不提供遞迴刪除。
@@ -105,11 +123,15 @@ shopads/
 
 `package` 建立暫存清單，計算雜湊，再直接寫入 ZIP。ZIP 內容使用相對路徑，不包含本機絕對路徑及設定檔。
 
-## 9. 發布擴充點
+## 9. AI 作業流程
+
+`analyze` 驗證 `yyyyMMdd-NN\Input`，先依自然檔名排序並計算 SHA-256；完全相同的內容只保留第一份參與後續流程，其餘不刪除原檔並記入 rejected。接著以 Pillow 的影格數將 GIF 分為單影格與動畫。單影格 GIF 產生一般分析副本；動畫 GIF 擷取首、中、末影格並組成一張預覽，不上傳完整動畫。Provider 同時彙整描述檔、廠商文字與圖片中清楚可辨識的文字；有廠商文字時固定建立摘要，否則去重後至少達 `summary_min_facts` 才建立。Provider 回傳後由本機依順序與 type 正規化輸出名稱為 `NN.png`／`NN.gif`，再驗證所有有效動畫 GIF 恰好出現一次、摘要頁最多一張且固定最後，原子寫入 `Work\ai-plan.json` 與 `preview.html`。`generate` 只接受通過 Schema 驗證的計畫；動畫 GIF 不重新編碼。Provider 對 429 與常見 5xx 暫時錯誤採最多三次指數退避重試。
+
+## 10. 發布擴充點
 
 後續發布模組只能讀取已驗證的封裝或 Final，不直接依賴生成流程。Facebook 與 GitHub 各自保存獨立狀態，使單邊重試不會造成另一邊重複發布。
 
-## 10. Repository 與 Workspace 邊界
+## 11. Repository 與 Workspace 邊界
 
 ```text
 D:\CASE\
@@ -119,7 +141,7 @@ D:\CASE\
 │  └─ PublishSecretTimeWebsite.*  獨立發布至 GitHub Pages repository
 └─ Shop_ADs\                     ryan0228/Store_ADs
    ├─ App\
-   └─ yyyyMMdd\
+   └─ yyyyMMdd-NN\
 ```
 
 - `Shop_ADs` 與 `SmartCabiNet` 必須維持同層的兩個獨立 Git repositories，不可建立巢狀 repository。

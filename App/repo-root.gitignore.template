@@ -12,9 +12,11 @@ App/ShopAds.exe
 **/PublishPackages/
 **/run-manifest.json
 **/Result/Generated/
+**/Work/
 
 # Private daily work folders (the GitHub repository is public)
 /[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]/
+/[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9]/
 
 # Local overrides and secrets
 **/config.local.toml

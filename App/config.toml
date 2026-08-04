@@ -5,7 +5,7 @@ work_root = 'D:\CASE\Shop_ADs'
 width = 1080
 height = 1080
 default_style = "clean"
-max_images_per_page = 3
+max_images_per_page = 4
 output_format = "png"
 
 [font]
@@ -28,3 +28,19 @@ safe_margin = 72
 corner_radius = 26
 shadow_blur = 18
 rotation_degrees = 2.0
+
+[ai]
+# Google Gemini 多模態模型，用於選圖、分組與撰寫商品文案。
+provider = "google"
+model = "gemini-3.6-flash"
+analysis_max_dimension = 768
+max_input_images = 15
+gif_frame_analysis = true
+# 沒有廠商文字時，至少有此數量的可驗證資訊才產生最後摘要頁。
+summary_min_facts = 3
+
+[branding]
+store_name = "情趣時光"
+footer_image = "assets/branding/shop-footer.png"
+footer_width = 250
+footer_margin = 28

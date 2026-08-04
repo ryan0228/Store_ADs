@@ -15,8 +15,21 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "width": 1080,
         "height": 1080,
         "default_style": "clean",
-        "max_images_per_page": 3,
+        "max_images_per_page": 4,
         "output_format": "png",
+    },
+    "ai": {
+        "provider": "openai",
+        "model": "",
+        "analysis_max_dimension": 768,
+        "max_input_images": 15,
+        "gif_frame_analysis": True,
+    },
+    "branding": {
+        "store_name": "情趣時光",
+        "footer_image": "assets/branding/shop-footer.png",
+        "footer_width": 250,
+        "footer_margin": 28,
     },
     "font": {
         "regular": r"C:\Windows\Fonts\msjh.ttc",
@@ -85,6 +98,8 @@ def load_config(config_path: Path | None, job_dir: Path | None = None) -> dict[s
     config = copy.deepcopy(DEFAULT_CONFIG)
     selected = config_path or application_dir() / "config.toml"
     _deep_merge(config, _read_toml(selected, required=True))
+    local_path = selected.with_name("config.local.toml")
+    _deep_merge(config, _read_toml(local_path))
 
     if job_dir:
         job_settings = _read_toml(job_dir / "job.toml")
@@ -100,6 +115,7 @@ def load_config(config_path: Path | None, job_dir: Path | None = None) -> dict[s
 
     validate_config(config)
     config["_config_path"] = str(selected.resolve())
+    config["_local_config_path"] = str(local_path.resolve())
     return config
 
 
@@ -109,9 +125,9 @@ def validate_config(config: dict[str, Any]) -> None:
         raise ShopAdsError(
             "E005", "LOAD_CONFIG", "第一階段輸出尺寸必須為 1080×1080。"
         )
-    if image.get("max_images_per_page") != 3:
+    if image.get("max_images_per_page") != 4:
         raise ShopAdsError(
-            "E006", "LOAD_CONFIG", "第一階段每頁圖片數必須為 3。"
+            "E006", "LOAD_CONFIG", "AI 版型每頁圖片上限必須為 4。"
         )
     style_name = image.get("default_style", "clean")
     if style_name not in config.get("styles", {}):
@@ -128,3 +144,10 @@ def validate_config(config: dict[str, Any]) -> None:
                 str(font_path),
                 "請在 config.toml 指定可顯示繁體中文的字型。",
             )
+    branding = config.get("branding", {})
+    footer_path = Path(str(branding.get("footer_image", "")))
+    if not footer_path.is_absolute():
+        footer_path = application_dir() / footer_path
+    if not footer_path.is_file():
+        raise ShopAdsError("E009", "LOAD_CONFIG", "找不到店鋪品牌頁尾圖片。", str(footer_path))
+    config["branding"]["_footer_image_path"] = str(footer_path.resolve())

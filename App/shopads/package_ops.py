@@ -69,9 +69,6 @@ def check_final(job_dir: Path, config: dict[str, Any]) -> list[Path]:
 def create_package(job_dir: Path, config: dict[str, Any], version: str) -> Path:
     final_files = check_final(job_dir, config)
     markdown_files = sorted(job_dir.glob("*.md"))
-    for group_dir in sorted(item for item in job_dir.iterdir() if item.is_dir() and item.name.isdigit()):
-        markdown_files.extend(sorted(group_dir.glob("*.md")))
-
     records: list[dict[str, Any]] = []
     sources: list[tuple[Path, str]] = []
     for path in final_files:
