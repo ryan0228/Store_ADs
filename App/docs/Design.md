@@ -79,9 +79,9 @@ shopads/
 - 中央商品卡片區
 - 下方說明與下標題安全區
 
-來源圖以 `contain` 模式完整放入卡片。AI 從 `hero`、`two_cards`、`three_cards`、`four_grid` 中選擇；最後商品資訊摘要使用 `vendor_text`。卡片使用白底、圓角、邊框與陰影。旋轉角度由作業、成品序號及檔名計算固定 seed，確保重跑一致。
+來源圖以 `contain` 模式完整放入卡片。AI 只可從 `hero`、`two_cards` 中選擇，每張最多兩個來源；最後商品資訊摘要使用 `vendor_text`。卡片使用白底、圓角、邊框與陰影，背景使用低彩度漸層與半透明裝飾圓形。旋轉角度由作業、成品序號及檔名計算固定 seed，確保重跑一致。
 
-所有 PNG 在其他內容完成後，統一由合成器將 `assets\branding\shop-footer.png` 等比例縮放並貼至右下角品牌安全區。品牌資產由 `config.toml` 指定相對 App 路徑，啟動時驗證，不交給 AI 修改。多影格 GIF 保持 passthrough，不套品牌圖；單影格 GIF 進入靜態合成流程。
+所有 PNG 在其他內容完成後，統一由合成器將 `assets\branding\shop-footer.png` 等比例縮放至設定寬度並貼至左下角。其右側顯示 `assets\branding\store-banner.md` 的 Markdown 清單項目；選擇索引以作業名稱、成品序號與固定字串計算 SHA-256 seed，因此具隨機感但可重現。品牌資產與特色檔由 `config.toml` 指定相對 App 路徑，啟動時驗證，不交給 AI 修改。多影格 GIF 保持 passthrough，不套品牌圖；單影格 GIF 進入靜態合成流程。
 
 `vendor_text` 不引用來源圖片，作為獨立的商品資訊摘要卡。AI 將商品描述、廠商文字與圖片 OCR 可辨識資訊合併、去重、翻譯並濃縮為繁體中文重點。廠商文字存在時必須產生；否則由 `ai.summary_min_facts` 控制最低資訊量，達標才產生。該輸出最多一張，且必須位於所有靜態圖與 GIF 計畫之後。
 
@@ -116,6 +116,8 @@ shopads/
 ```
 
 刪除前解析絕對路徑，確認父目錄正是目前作業的 `Result\Generated`。程式不提供遞迴刪除。
+
+成品先在同磁碟暫存目錄完成並驗證，再以 `os.replace` 移入 Generated。Windows 搬移可能保留暫存檔的受保護 ACL，因此清理既有成品前及每個新目的檔完成後，皆以 `icacls /inheritance:e` 恢復父目錄權限繼承；失敗時回報 `E304`，不得留下表面成功但使用者無法開啟的成品。
 
 ## 8. 封裝
 

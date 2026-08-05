@@ -31,7 +31,7 @@ def main(target: Path) -> None:
     plan = {
         "schema_version": 1,
         "outputs": [
-            {"output": "01.png", "type": "static", "layout": "three_cards", "images": ["01.png", "02.png", "03.png"], "top_title": "簡約生活，從今天開始", "description": "保留商品完整外觀與清楚資訊", "bottom_title": "探索理想選擇"},
+            {"output": "01.png", "type": "static", "layout": "two_cards", "images": ["01.png", "02.png"], "top_title": "簡約生活，從今天開始", "description": "保留商品完整外觀與清楚資訊", "bottom_title": "探索理想選擇"},
             {"output": "02.png", "type": "text", "layout": "vendor_text", "images": [], "top_title": "廠商商品資訊", "description": "• 廠商日文說明已翻譯為繁體中文\n• 文字經過整理，方便快速閱讀\n• 實際內容請以商品標示為準", "bottom_title": "購買前請詳閱"},
         ],
         "rejected": [],

@@ -29,7 +29,7 @@
 - [x] P205 建立 OpenAI 與 Google AI Provider Adapter（Google 真實 UAT 已通過）
 - [x] P206 建立 AI 選圖、分組、排序、文案及 GIF 排序規則
 - [x] P207 建立本機 HTML 計畫預覽與確認流程
-- [x] P208 擴充一至四張受控版型與連續輸出命名
+- [x] P208 建立受控版型與連續輸出命名（後續 P227 依 UAT 限縮為一至兩張）
 - [ ] P209 加入輸入雜湊快取、token usage 與成本紀錄
 - [x] P210 加入 `config.local.toml`、範本與機密防護
 - [x] P211 更新 Manifest、Final、封裝與使用說明
@@ -45,5 +45,7 @@
 - [ ] P221 讓 Skill 檢視 Generated 並依指示重做指定成品
 - [ ] P222 加入 AI 背景選配（目前需求明確排除，保留未來評估）
 - [x] P225 圖片文字與商品描述去重彙整，依資訊量產生最後摘要頁
+- [x] P226 修復 Windows 暫存成品移入 Generated 後未繼承使用者 ACL
+- [x] P227 摘要亮點文案、雙圖上限、柔和背景與左側品牌特色列
 - [ ] P230 設計 Facebook 授權、預覽、確認、發布與重試
 - [ ] P231 設計靜態網站內容映射、Dry Run 與 GitHub 發布驗證

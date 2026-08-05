@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 try:
-    from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageOps, UnidentifiedImageError
+    from PIL import Image, ImageColor, ImageDraw, ImageFilter, ImageFont, ImageOps, UnidentifiedImageError
 except ImportError as exc:  # pragma: no cover - environment guard
     raise RuntimeError("缺少 Pillow；請先執行 python -m pip install Pillow。") from exc
 
@@ -154,7 +154,39 @@ def _paste_rotated_card(
     canvas.alpha_composite(rotated, (x, y))
 
 
-def _apply_branding(canvas: Image.Image, config: dict[str, Any]) -> None:
+def _create_background(width: int, height: int, style: dict[str, Any]) -> Image.Image:
+    start = ImageColor.getrgb(str(style["background_color"]))
+    end = ImageColor.getrgb(str(style.get("background_tint", style["background_color"])))
+    canvas = Image.new("RGBA", (width, height))
+    pixels = canvas.load()
+    for y in range(height):
+        ratio = y / max(1, height - 1)
+        color = tuple(round(start[index] * (1 - ratio) + end[index] * ratio) for index in range(3)) + (255,)
+        for x in range(width):
+            pixels[x, y] = color
+    decoration = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(decoration)
+    accent = ImageColor.getrgb(str(style["accent_color"]))
+    primary = ImageColor.getrgb(str(style["primary_color"]))
+    draw.ellipse((-180, 170, 360, 710), fill=(*accent, 20))
+    draw.ellipse((760, 80, 1240, 560), fill=(*primary, 12))
+    draw.ellipse((690, 700, 1180, 1190), fill=(*accent, 12))
+    canvas.alpha_composite(decoration)
+    return canvas
+
+
+def _banner_lines(path: Path) -> list[str]:
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError as exc:
+        raise ShopAdsError("E208", "PROCESS_IMAGES", f"店鋪特色文字無法讀取：{exc}", str(path)) from exc
+    values = [line.lstrip()[2:].strip() for line in lines if line.lstrip().startswith("- ") and line.lstrip()[2:].strip()]
+    if not values:
+        raise ShopAdsError("E208", "PROCESS_IMAGES", "店鋪特色文字檔沒有可用項目。", str(path))
+    return values
+
+
+def _apply_branding(canvas: Image.Image, config: dict[str, Any], group: str, page_number: int) -> None:
     branding = config["branding"]
     path = Path(branding["_footer_image_path"])
     try:
@@ -166,7 +198,24 @@ def _apply_branding(canvas: Image.Image, config: dict[str, Any]) -> None:
     target_height = max(1, round(logo.height * target_width / logo.width))
     logo = logo.resize((target_width, target_height), Image.Resampling.LANCZOS)
     margin = int(branding["footer_margin"])
-    canvas.alpha_composite(logo, (canvas.width - target_width - margin, canvas.height - target_height - margin))
+    y = canvas.height - target_height - margin
+    canvas.alpha_composite(logo, (margin, y))
+
+    banner_path = Path(branding["_banner_text_path"])
+    lines = _banner_lines(banner_path)
+    seed = int.from_bytes(hashlib.sha256(f"{group}|{page_number}|store-banner".encode("utf-8")).digest()[:8], "big")
+    banner = lines[seed % len(lines)]
+    draw = ImageDraw.Draw(canvas)
+    fit_text(
+        draw,
+        banner,
+        config["font"]["bold"],
+        int(branding.get("banner_font_size", 28)),
+        18,
+        (margin + target_width + 20, y - 8, canvas.width - margin, y + target_height + 8),
+        config["styles"][config["image"]["default_style"]]["primary_color"],
+        spacing=2,
+    )
 
 
 def _save_canvas(canvas: Image.Image, output_path: Path) -> None:
@@ -193,7 +242,7 @@ def compose_clean(
     font_cfg = config["font"]
     style = config["styles"][image_cfg["default_style"]]
     width, height = int(image_cfg["width"]), int(image_cfg["height"])
-    canvas = Image.new("RGBA", (width, height), style["background_color"])
+    canvas = _create_background(width, height, style)
     draw = ImageDraw.Draw(canvas)
 
     margin = int(style["safe_margin"])
@@ -212,19 +261,13 @@ def compose_clean(
 
     count = len(image_paths)
     if count == 1:
-        card_width, card_height = 700, 520
+        card_width, card_height = 760, 520
         centers = [(540, 493)]
     elif count == 2:
-        card_width, card_height = 430, 500
-        centers = [(295, 500), (785, 500)]
-    elif count == 3:
-        card_width, card_height = 290, 470
-        centers = [(215, 505), (540, 505), (865, 505)]
-    elif count == 4:
-        card_width, card_height = 390, 245
-        centers = [(320, 365), (760, 365), (320, 655), (760, 655)]
+        card_width, card_height = 465, 510
+        centers = [(285, 500), (795, 500)]
     else:
-        raise ShopAdsError("E206", "PROCESS_IMAGES", "單張成品來源圖片必須為一至四張。")
+        raise ShopAdsError("E206", "PROCESS_IMAGES", "單張成品來源圖片必須為一至二張。")
 
     maximum_rotation = float(style["rotation_degrees"])
     for path, center in zip(image_paths, centers, strict=True):
@@ -238,7 +281,7 @@ def compose_clean(
         font_cfg["regular"],
         int(font_cfg["body_size"]),
         int(font_cfg["minimum_size"]),
-        (margin, 785, width - margin, 925),
+        (margin, 775, width - margin, 895),
         style["body_color"],
         spacing=6,
     )
@@ -248,30 +291,30 @@ def compose_clean(
         font_cfg["bold"],
         int(font_cfg["footer_size"]),
         int(font_cfg["minimum_size"]),
-        (margin, 930, width - int(config["branding"]["footer_width"]) - int(config["branding"]["footer_margin"]) * 2, 1035),
+        (margin, 895, width - margin, 950),
         style["primary_color"],
         spacing=5,
     )
 
-    _apply_branding(canvas, config)
+    _apply_branding(canvas, config, group, page_number)
     _save_canvas(canvas, output_path)
 
 
-def compose_vendor_text(description: dict[str, str], config: dict[str, Any], output_path: Path) -> None:
+def compose_vendor_text(description: dict[str, str], group: str, page_number: int, config: dict[str, Any], output_path: Path) -> None:
     image_cfg = config["image"]
     font_cfg = config["font"]
     style = config["styles"][image_cfg["default_style"]]
     width, height = int(image_cfg["width"]), int(image_cfg["height"])
     margin = int(style["safe_margin"])
-    canvas = Image.new("RGBA", (width, height), style["background_color"])
+    canvas = _create_background(width, height, style)
     draw = ImageDraw.Draw(canvas)
     draw.rounded_rectangle((margin, 38, width - margin, 46), radius=4, fill=style["accent_color"])
     fit_text(draw, description["上標題"], font_cfg["bold"], int(font_cfg["title_size"]), int(font_cfg["minimum_size"]), (margin, 65, width - margin, 190), style["title_color"])
-    panel = (margin, 220, width - margin, 885)
+    panel = (margin, 220, width - margin, 850)
     draw.rounded_rectangle(panel, radius=int(style["corner_radius"]), fill=style["card_color"], outline=style["accent_color"], width=4)
     fit_text(draw, description["說明"], font_cfg["regular"], int(font_cfg["body_size"]), int(font_cfg["minimum_size"]), (panel[0] + 45, panel[1] + 40, panel[2] - 45, panel[3] - 40), style["body_color"], spacing=12)
-    fit_text(draw, description["下標題"], font_cfg["bold"], int(font_cfg["footer_size"]), int(font_cfg["minimum_size"]), (margin, 910, width - int(config["branding"]["footer_width"]) - int(config["branding"]["footer_margin"]) * 2, 1035), style["primary_color"], spacing=5)
-    _apply_branding(canvas, config)
+    fit_text(draw, description["下標題"], font_cfg["bold"], int(font_cfg["footer_size"]), int(font_cfg["minimum_size"]), (margin, 865, width - margin, 945), style["primary_color"], spacing=5)
+    _apply_branding(canvas, config, group, page_number)
     _save_canvas(canvas, output_path)
 
 

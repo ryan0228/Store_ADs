@@ -4,6 +4,7 @@ import json
 import shutil
 import tempfile
 import unittest
+from unittest.mock import Mock, patch
 from pathlib import Path
 
 from shopads.ai_plan import normalize_output_names, validate_plan
@@ -18,6 +19,46 @@ CONFIG_PATH = PROJECT_ROOT / "config.toml"
 
 
 class CoreTests(unittest.TestCase):
+    def test_store_banner_reads_only_markdown_list_items(self) -> None:
+        from shopads.compositor import _banner_lines
+
+        with tempfile.TemporaryDirectory() as temp_name:
+            path = Path(temp_name) / "store-banner.md"
+            path.write_text("# 標題\n\n這是說明。\n\n- 第一則\n- 第二則\n", encoding="utf-8")
+            self.assertEqual(_banner_lines(path), ["第一則", "第二則"])
+
+    def test_plan_rejects_more_than_two_static_images(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_name:
+            job = Path(temp_name) / "20260805-01"
+            input_dir = job / "Input"
+            input_dir.mkdir(parents=True)
+            (job / "Product_Description.md").write_text("# 商品名稱\n測試\n# 商品說明\n說明\n", encoding="utf-8")
+            for index, name in enumerate(("1.png", "2.png", "3.png"), start=1):
+                (input_dir / name).write_bytes(f"unique-{index}".encode())
+            payload = {"schema_version": 1, "outputs": [{"output": "01.png", "type": "static", "layout": "three_cards", "images": ["1.png", "2.png", "3.png"], "top_title": "標題", "description": "說明", "bottom_title": "下標題"}], "rejected": []}
+            with self.assertRaises(ShopAdsError) as context:
+                validate_plan(payload, job)
+            self.assertEqual(context.exception.code, "E608")
+
+    def test_restore_inherited_permissions_uses_icacls_on_windows(self) -> None:
+        from shopads.cli import _restore_inherited_permissions
+
+        with patch("shopads.cli.os.name", "nt"), patch("shopads.cli.subprocess.run", return_value=Mock(returncode=0)) as run:
+            _restore_inherited_permissions(Path("output.gif"))
+        self.assertEqual(run.call_args.args[0], ["icacls", "output.gif", "/inheritance:e"])
+
+    def test_generated_cleanup_restores_permissions_before_unlink(self) -> None:
+        from shopads.cli import _safe_cleanup_generated
+
+        with tempfile.TemporaryDirectory() as temp_name:
+            generated = Path(temp_name) / "Generated"
+            generated.mkdir()
+            output = generated / "01.gif"
+            output.write_bytes(b"gif")
+            with patch("shopads.cli._restore_inherited_permissions") as restore:
+                self.assertEqual(_safe_cleanup_generated(generated), ["01.gif"])
+            restore.assert_called_once_with(output)
+
     def test_ai_output_names_are_normalized_by_type_and_order(self) -> None:
         payload = {"outputs": [{"output": "wrong.gif", "type": "static"}, {"output": "wrong.png", "type": "gif"}]}
         normalize_output_names(payload)
@@ -27,9 +68,11 @@ class CoreTests(unittest.TestCase):
         from shopads.ai_provider import _prompt
 
         prompt = _prompt({"商品名稱": "測試", "商品說明": "360度按摩頭"}, ["front.jpg"], [], 3)
-        self.assertIn("材質、結構、功能與效果性文字必須能在商品資料原文中直接找到依據", prompt)
+        self.assertIn("材質、結構、功能與效果性文字必須能在商品資料原文或圖片清楚文字中直接找到依據", prompt)
         self.assertIn("不可自行加上「可彎曲」", prompt)
         self.assertIn("至少有 3 項具體且可驗證的資訊", prompt)
+        self.assertIn("每張成品最多使用 2 張", prompt)
+        self.assertIn("先根據確認資訊生成一段簡短自然的「商品亮點」文案", prompt)
 
     def test_new_job_uses_next_sequence_and_complete_structure(self) -> None:
         with tempfile.TemporaryDirectory() as temp_name:
@@ -117,15 +160,15 @@ class IntegrationTests(unittest.TestCase):
         from shopads.cli import main
         from shopads.package_ops import verify_package
 
-        for name, color in (("1.png", (220, 60, 60)), ("2.png", (60, 180, 100)), ("3.png", (70, 110, 220)), ("4.png", (220, 170, 40))):
+        for name, color in (("1.png", (220, 60, 60)), ("2.png", (60, 180, 100))):
             self._create_png(name, color)
-        self._save_plan([{"output": "01.png", "type": "static", "layout": "four_grid", "images": ["1.png", "2.png", "3.png", "4.png"], "top_title": "四張商品細節", "description": "只使用提供的原始圖片", "bottom_title": "清楚呈現"}])
+        self._save_plan([{"output": "01.png", "type": "static", "layout": "two_cards", "images": ["1.png", "2.png"], "top_title": "兩張商品細節", "description": "只使用提供的原始圖片", "bottom_title": "清楚呈現"}])
         self.assertEqual(main(["--config", str(CONFIG_PATH), "generate", str(self.job)]), 0)
         generated = self.job / "Result" / "Generated"
         self.assertEqual([item.name for item in generated.iterdir()], ["01.png"])
         from PIL import Image
         with Image.open(generated / "01.png") as rendered:
-            brand_crop = rendered.crop((800, 955, 1055, 1055)).convert("RGB")
+            brand_crop = rendered.crop((20, 950, 175, 1055)).convert("RGB")
             self.assertGreater(len(brand_crop.getcolors(maxcolors=100000) or []), 20)
         final = self.job / "Result" / "Final"
         shutil.copyfile(generated / "01.png", final / "01.png")
@@ -183,7 +226,7 @@ class IntegrationTests(unittest.TestCase):
         self.assertTrue(output.is_file())
         with Image.open(output) as rendered:
             self.assertEqual(rendered.size, (1080, 1080))
-            brand_crop = rendered.crop((800, 955, 1055, 1055)).convert("RGB")
+            brand_crop = rendered.crop((20, 950, 175, 1055)).convert("RGB")
             self.assertGreater(len(brand_crop.getcolors(maxcolors=100000) or []), 20)
 
     def test_animated_gif_preview_is_small_jpeg(self) -> None:

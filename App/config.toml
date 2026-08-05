@@ -5,7 +5,7 @@ work_root = 'D:\CASE\Shop_ADs'
 width = 1080
 height = 1080
 default_style = "clean"
-max_images_per_page = 4
+max_images_per_page = 2
 output_format = "png"
 
 [font]
@@ -18,6 +18,7 @@ minimum_size = 22
 
 [styles.clean]
 background_color = "#F7F5F2"
+background_tint = "#FFF0EA"
 primary_color = "#234E70"
 accent_color = "#F2B134"
 title_color = "#222222"
@@ -42,5 +43,7 @@ summary_min_facts = 3
 [branding]
 store_name = "情趣時光"
 footer_image = "assets/branding/shop-footer.png"
-footer_width = 250
+footer_width = 125
 footer_margin = 28
+banner_text_file = "assets/branding/store-banner.md"
+banner_font_size = 28

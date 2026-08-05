@@ -5,6 +5,7 @@ import logging
 import os
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -18,6 +19,24 @@ from .validation import JobSpec, inspect_job, resolve_job_dir
 
 
 LOGGER = logging.getLogger("shopads")
+
+
+def _restore_inherited_permissions(path: Path) -> None:
+    """Windows 搬移暫存成品後，恢復目的目錄的 ACL 繼承。"""
+    if os.name != "nt":
+        return
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    try:
+        result = subprocess.run(
+            ["icacls", str(path), "/inheritance:e"],
+            capture_output=True,
+            check=False,
+            creationflags=flags,
+        )
+    except OSError as exc:
+        raise ShopAdsError("E304", "WRITE_OUTPUT", f"無法恢復成品權限繼承：{exc}", str(path)) from exc
+    if result.returncode != 0:
+        raise ShopAdsError("E304", "WRITE_OUTPUT", "無法恢復成品權限繼承。", str(path), "請確認目前帳號可修改 Generated 檔案權限。")
 
 
 def _close_logging() -> None:
@@ -68,6 +87,7 @@ def _safe_cleanup_generated(generated_dir: Path) -> list[str]:
     removed: list[str] = []
     for path in generated_dir.iterdir():
         if path.is_file() and pattern.fullmatch(path.name):
+            _restore_inherited_permissions(path)
             path.unlink()
             removed.append(path.name)
     return removed
@@ -170,7 +190,7 @@ def command_generate(args: argparse.Namespace) -> int:
                     verify_image(output)
                     mode = "gif_passthrough"
                 elif output_plan["type"] == "text":
-                    compose_vendor_text({"上標題": output_plan["top_title"], "說明": output_plan["description"], "下標題": output_plan["bottom_title"]}, config, output)
+                    compose_vendor_text({"上標題": output_plan["top_title"], "說明": output_plan["description"], "下標題": output_plan["bottom_title"]}, job_dir.name, int(Path(name).stem), config, output)
                     verify_image(output, expected_size)
                     mode = "vendor_text"
                 else:
@@ -186,6 +206,7 @@ def command_generate(args: argparse.Namespace) -> int:
             for staged_path, result in zip(staged_all, group_results, strict=True):
                 destination = generated_dir / staged_path.name
                 os.replace(staged_path, destination)
+                _restore_inherited_permissions(destination)
                 result["outputs"] = [relative_record(destination, job_dir)]
                 LOGGER.info("[WRITE_OUTPUT] 已產生：%s", destination)
     except ShopAdsError as exc:

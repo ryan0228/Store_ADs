@@ -1,6 +1,6 @@
 # Shop Ads 系統導覽（AI／Codex 閱讀入口）
 
-> 本文件是後續 AI 接手 `D:\CASE\Shop_ADs` 時的第一閱讀入口。最後更新基準為 ShopAds `0.2.7`。正式需求、設計與工作狀態仍分別以 `Requirement.md`、`Design.md`、`TaskList.md` 為準；若程式、測試與文件不一致，先查明差異並更新契約，不可猜測。
+> 本文件是後續 AI 接手 `D:\CASE\Shop_ADs` 時的第一閱讀入口。最後更新基準為 ShopAds `0.2.9`。正式需求、設計與工作狀態仍分別以 `Requirement.md`、`Design.md`、`TaskList.md` 為準；若程式、測試與文件不一致，先查明差異並更新契約，不可猜測。
 
 ## 1. 接手規則
 
@@ -54,6 +54,7 @@ D:\CASE\Shop_ADs\
 │  ├─ GenerateLatest.cmd
 │  ├─ PackageLatest.cmd
 │  ├─ assets\branding\shop-footer.png
+│  ├─ assets\branding\store-banner.md
 │  ├─ templates\Product_Description.md
 │  ├─ docs\
 │  ├─ shopads\
@@ -159,8 +160,6 @@ Plan 位於 `Work\ai-plan.json`，由 `ai_plan.py` 驗證。Provider 回傳後�
 |---|---|---:|---|
 | `static` | `hero` | 1 | 單張主視覺 |
 | `static` | `two_cards` | 2 | 兩張圖片 |
-| `static` | `three_cards` | 3 | 三張圖片 |
-| `static` | `four_grid` | 4 | 四張網格 |
 | `gif` | `original_gif` | 1 | 多影格 GIF 原樣複製 |
 | `text` | `vendor_text` | 0 | 商品資訊摘要頁，最多一張且必須最後 |
 
@@ -178,9 +177,9 @@ Plan 位於 `Work\ai-plan.json`，由 `ai_plan.py` 驗證。Provider 回傳後�
 `compositor.py` 只接受通過驗證的 Plan：
 
 - PNG 固定 1080×1080、sRGB、完整顯示商品主體，不裁切。
-- clean 版型包含白色卡片、圓角、邊框、陰影及固定 seed 小角度旋轉。
+- clean 版型包含白色卡片、圓角、邊框、陰影、固定 seed 小角度旋轉，以及低彩度漸層與柔和裝飾背景。
 - 文字依像素寬度換行並逐級縮小；最小字級仍放不下時報錯，不截斷。
-- 所有 PNG 右下角貼 `assets\branding\shop-footer.png`，圖內已包含「情趣時光」，不另外重複畫店名。
+- 所有 PNG 左下角貼半寬 `assets\branding\shop-footer.png`；右側顯示 `assets\branding\store-banner.md` 清單中依作業與序號固定選取的店鋪特色。
 - 多影格 GIF 為 passthrough：不重新編碼、不加文字、不加品牌，SHA／位元組必須與原檔一致。
 - `vendor_text` 將描述檔、廠商文字與圖片文字去重整理後放在獨立摘要卡，且同樣加入品牌頁尾。
 
@@ -232,18 +231,20 @@ powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\Build.ps1
 .\ShopAds.exe --version
 ```
 
-截至 0.2.7 有 15 項測試通過，涵蓋全格式精確去重、靜態與動畫重複輸入分類、文案來源約束，以及沒有廠商文字時依圖片文字產生最後摘要頁。
+截至 0.2.9 有 19 項測試，涵蓋全格式精確去重、靜態與動畫重複輸入分類、文案來源約束、圖片文字摘要、Windows ACL 恢復、雙圖上限與店鋪特色清單解析。
 
 `ShopAds.exe`、`.venv`、build、dist 與 spec 均為本機產物，Git 忽略。
 
 ## 13. 目前狀態與已知缺口
 
-- 目前版本：0.2.7。
+- 目前版本：0.2.9。
 - 真實 UAT 作業：`20260804-01` 驗證全格式精確去重；`20260804-02` 驗證圖片文字彙整與最後摘要頁。
 - 目前 Provider 為 Google `gemini-3.6-flash`；兩次真實 analyze 與 generate 均成功，PNG 品牌與版面通過目視 QA，GIF 輸出 SHA-256 均與來源一致。
 - 全格式精確去重已完成：自然排序後保留相同 SHA-256 的第一份，其餘不送 AI、不刪除 Input，並寫入 Log 與 rejected。真實 UAT 將兩份相同動畫 GIF 縮減為一份有效來源，Generated 由四個成品降為三個。
 - Google 暫時性 429／5xx 最多退避重試三次；真實 UAT 曾遇 503 high demand，後續重跑成功。
 - 20260804-02 UAT 已驗證圖片文字摘要：7 張靜態圖與 4 個動畫 GIF 產生 3 張圖片頁、4 個原樣 GIF，以及最後一張商品資訊總覽；摘要涵蓋功能、材質防水、充電、尺寸與配件，排版未截斷。
+- 20260805-01 UAT 發現 Codex 暫存成品保留受保護 ACL，導致一般使用者無法開啟；0.2.8 在成品移入 Generated 後恢復父目錄權限繼承，且不改變 GIF 位元組。
+- 20260805-01 於 0.2.9 再次執行 Google AI UAT：7 張靜態圖片與 4 個動畫 GIF 規劃為 4 張商品 PNG、4 個原樣 GIF 及 1 張資訊總覽。每張商品 PNG 僅使用一至兩張來源圖；AI 依商品描述與圖片文字產生並去除重複文案，資訊總覽以「商品亮點」開頭彙整規格。PNG 已通過目視 QA，包含柔和漸層背景、左側半寬 Logo 與可重現選取的店鋪特色。
 - 尚未完成輸入 SHA 快取、精確成本報表與 Final／package 真實商品 UAT。
 - Facebook、GitHub、網站發布與 Credential Manager 不在目前已實作範圍。
 

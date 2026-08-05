@@ -29,7 +29,7 @@ PLAN_RESPONSE_SCHEMA: dict[str, Any] = {
                 "properties": {
                     "output": {"type": "string"},
                     "type": {"type": "string", "enum": ["static", "gif", "text"]},
-                    "layout": {"type": "string", "enum": ["hero", "two_cards", "three_cards", "four_grid", "original_gif", "vendor_text"]},
+                    "layout": {"type": "string", "enum": ["hero", "two_cards", "original_gif", "vendor_text"]},
                     "images": {"type": "array", "items": {"type": "string"}},
                     "top_title": {"type": "string"},
                     "description": {"type": "string"},
@@ -87,13 +87,13 @@ def _analysis_gif_preview(path: Path, maximum: int) -> tuple[str, str]:
 
 
 def _prompt(product: dict[str, str], static_names: list[str], gif_names: list[str], summary_min_facts: int = 3) -> str:
-    return f"""你是商品廣告圖片規劃器。只根據提供的繁體中文商品資料與圖片規劃，不可發明尺寸、材質、價格、產地、結構、功能、功效或保證。圖片只能支持顏色、形狀、畫面配置等直接可見的外觀描述；材質、結構、功能與效果性文字必須能在商品資料原文中直接找到依據，不可從外觀猜測或擴寫，例如原文寫「360度按摩頭」時不可自行加上「可彎曲」。不可生成、修改或換背景；只選擇、排序、分組原圖並撰寫短文案。靜態圖（包含單影格 GIF）每張成品使用 1 到 4 張，版型與數量必須對應 hero=1、two_cards=2、three_cards=3、four_grid=4。多影格動畫 GIF 已提供首／中／末代表影格預覽；每個動畫必須恰好安排一次、不可排除、不與其他圖合併，使用 original_gif。輸出依展示順序連續命名 01.png/01.gif。可排除重複、模糊或低價值的靜態圖片，但列出原因。全部文字使用繁體中文。
+    return f"""你是商品廣告圖片規劃器。只根據提供的繁體中文商品資料與圖片規劃，不可發明尺寸、材質、價格、產地、結構、功能、功效或保證。圖片只能支持顏色、形狀、畫面配置等直接可見的外觀描述；材質、結構、功能與效果性文字必須能在商品資料原文或圖片清楚文字中直接找到依據，不可從外觀猜測或擴寫，例如原文寫「360度按摩頭」時不可自行加上「可彎曲」。你可以根據已確認的商品特性生成簡短、有吸引力但不誇大的繁體中文文案，並與 Product_Description.md 既有文字及圖片文字合併去重；即使描述檔只有基本資料，也要為一般圖片頁產生自然短文案。不可生成、修改或換背景；只選擇、排序、分組原圖並撰寫短文案。靜態圖（包含單影格 GIF）每張成品最多使用 2 張，版型與數量必須對應 hero=1、two_cards=2；需要更多圖片時拆成更多成品，不可使用三圖或四宮格。多影格動畫 GIF 已提供首／中／末代表影格預覽；每個動畫必須恰好安排一次、不可排除、不與其他圖合併，使用 original_gif。輸出依展示順序連續命名 01.png/01.gif。可排除重複、模糊或低價值的靜態圖片，但列出原因。全部文字使用繁體中文。
 
 商品資料：{json.dumps(product, ensure_ascii=False)}
 若「商品用途」留白，請只根據商品名稱、商品說明與可見圖片推導中性的使用情境，不得加入無依據功效。
 靜態檔名（單影格 GIF 也在此）：{json.dumps(static_names, ensure_ascii=False)}
 動畫 GIF 檔名：{json.dumps(gif_names, ensure_ascii=False)}
-最後摘要頁規則：同時讀取商品資料與圖片中清楚可辨識的文字，整理功能、材質、操作、規格、尺寸、配件等具體資訊；相同資訊只保留一次，不可猜測看不清楚的文字，也不可新增來源沒有的宣稱。若「廠商文字說明」有內容，必須辨識語言並翻譯／整理為繁體中文，且一定產生摘要頁。若沒有廠商文字，只有在去除重複後至少有 {summary_min_facts} 項具體且可驗證的資訊時才產生；資訊不足就不要勉強產生。摘要頁在 outputs 最後加入且最多一筆，使用 type=text、layout=vendor_text、images=[]；上標題使用「商品資訊總覽」或貼近內容的名稱，description 以清楚分行的精簡重點呈現。
+最後摘要頁規則：同時讀取商品資料與圖片中清楚可辨識的文字，整理功能、材質、操作、規格、尺寸、配件等具體資訊；相同資訊只保留一次，不可猜測看不清楚的文字，也不可新增來源沒有的宣稱。先根據確認資訊生成一段簡短自然的「商品亮點」文案，再接續分類規格；商品亮點要與 Product_Description.md 既有文案合併去重，不論原檔是否已提供完整宣傳句都要重新整理，不可只是逐字複製。若「廠商文字說明」有內容，必須辨識語言並翻譯／整理為繁體中文，且一定產生摘要頁。若沒有廠商文字，只有在去除重複後至少有 {summary_min_facts} 項具體且可驗證的資訊時才產生；資訊不足就不要勉強產生。摘要頁在 outputs 最後加入且最多一筆，使用 type=text、layout=vendor_text、images=[]；上標題使用「商品資訊總覽」或貼近內容的名稱，description 以「商品亮點」開頭，再以清楚分行的精簡重點呈現。
 
 只回傳 JSON 物件，格式為 schema_version=1、outputs 陣列、rejected 陣列。每個 output 都包含 output、type、layout、images、top_title、description、bottom_title；gif 的三個文字欄位填空字串。"""
 

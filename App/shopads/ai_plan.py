@@ -11,7 +11,7 @@ from .markdown import parse_sections
 from .validation import inspect_job
 
 
-LAYOUT_COUNTS = {"hero": 1, "two_cards": 2, "three_cards": 3, "four_grid": 4}
+LAYOUT_COUNTS = {"hero": 1, "two_cards": 2}
 
 
 def normalize_output_names(payload: dict[str, Any]) -> dict[str, Any]:

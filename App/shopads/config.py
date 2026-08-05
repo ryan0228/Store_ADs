@@ -15,7 +15,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "width": 1080,
         "height": 1080,
         "default_style": "clean",
-        "max_images_per_page": 4,
+        "max_images_per_page": 2,
         "output_format": "png",
     },
     "ai": {
@@ -28,8 +28,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "branding": {
         "store_name": "情趣時光",
         "footer_image": "assets/branding/shop-footer.png",
-        "footer_width": 250,
+        "footer_width": 125,
         "footer_margin": 28,
+        "banner_text_file": "assets/branding/store-banner.md",
+        "banner_font_size": 28,
     },
     "font": {
         "regular": r"C:\Windows\Fonts\msjh.ttc",
@@ -42,6 +44,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "styles": {
         "clean": {
             "background_color": "#F7F5F2",
+            "background_tint": "#FFF0EA",
             "primary_color": "#234E70",
             "accent_color": "#F2B134",
             "title_color": "#222222",
@@ -125,9 +128,9 @@ def validate_config(config: dict[str, Any]) -> None:
         raise ShopAdsError(
             "E005", "LOAD_CONFIG", "第一階段輸出尺寸必須為 1080×1080。"
         )
-    if image.get("max_images_per_page") != 4:
+    if image.get("max_images_per_page") != 2:
         raise ShopAdsError(
-            "E006", "LOAD_CONFIG", "AI 版型每頁圖片上限必須為 4。"
+            "E006", "LOAD_CONFIG", "AI 版型每頁圖片上限必須為 2。"
         )
     style_name = image.get("default_style", "clean")
     if style_name not in config.get("styles", {}):
@@ -151,3 +154,9 @@ def validate_config(config: dict[str, Any]) -> None:
     if not footer_path.is_file():
         raise ShopAdsError("E009", "LOAD_CONFIG", "找不到店鋪品牌頁尾圖片。", str(footer_path))
     config["branding"]["_footer_image_path"] = str(footer_path.resolve())
+    banner_path = Path(str(branding.get("banner_text_file", "")))
+    if not banner_path.is_absolute():
+        banner_path = application_dir() / banner_path
+    if not banner_path.is_file():
+        raise ShopAdsError("E010", "LOAD_CONFIG", "找不到店鋪特色文字檔。", str(banner_path))
+    config["branding"]["_banner_text_path"] = str(banner_path.resolve())
